@@ -13,7 +13,7 @@ An [OpenCode](https://opencode.ai) plugin that tracks the CO2 carbon footprint o
 
 ## Install
 
-The quickest way to install is to let OpenCode do it for you. Paste this link into your OpenCode prompt:
+The quickest way to install is to let OpenCode do it for you. Humans can fail, so let AI handle it. Paste this link into your OpenCode prompt:
 
 ```
 https://raw.githubusercontent.com/scaccogatto/opencode-footprint/main/INSTALL.md
