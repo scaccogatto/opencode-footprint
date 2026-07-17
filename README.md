@@ -7,7 +7,7 @@ An [OpenCode](https://opencode.ai) plugin that tracks the CO2 carbon footprint o
 - **Live tracking** -- automatically accumulates token usage across all messages in a session
 - **Eco scoring** -- assigns a letter grade (A+ to F) based on CO2 efficiency per message
 - **Real-world equivalents** -- translates grams of CO2 into Google searches, seconds of video streaming, smartphone charges, and more
-- **Multi-model aware** -- supports Anthropic, OpenAI, and Google models with size-based energy estimates
+- **Multi-model aware** -- tracks tokens per model and bills each model's tokens at its own size-based energy estimate, then sums across models used in the session
 - **Configurable grid intensity** -- override the default 400 gCO2/kWh with your region's carbon intensity
 - **Zero config** -- drop the files into your project and it works
 
@@ -39,7 +39,7 @@ Then make sure the plugin SDK is installed. If your project doesn't already have
 ```json
 {
   "dependencies": {
-    "@opencode-ai/plugin": "1.1.60"
+    "@opencode-ai/plugin": "1.18.3"
   }
 }
 ```
@@ -63,8 +63,8 @@ Ask OpenCode about your session's carbon footprint, CO2 emissions, or environmen
 ```
 ## Eco Report | Your Coding Carbon Footprint
 
-> **Session Grade: A** -- Excellent
-> Impact: `[██░░░░░░░░]`
+> **Session Grade: B-** -- Above Average
+> Impact: `[████░░░░░░]`
 
 ---
 
@@ -77,27 +77,36 @@ Ask OpenCode about your session's carbon footprint, CO2 emissions, or environmen
 | Total tokens | 12,450 |
 | API cost   | $0.034  |
 
+### Per-Model Breakdown
+
+| Model | Tokens | Energy |
+|-------|--------|--------|
+| claude-sonnet-4-5 | 10,000 | 11.0000 Wh |
+| claude-haiku-4-5  | 2,450  | 0.8085 Wh  |
+
 ### Carbon Footprint
 
 | Metric          | Value       |
 |-----------------|-------------|
-| Energy consumed | 12.4500 Wh |
-| **CO2 emitted** | **4.9800 g** |
-| CO2 per message | 1.2450 g   |
+| Energy consumed | 11.8085 Wh |
+| **CO2 emitted** | **4.7234 g** |
+| CO2 per message | 1.1809 g   |
 | Grid intensity  | 400 gCO2/kWh |
 
 ### Real-World Equivalents
 
 | Equivalent                  | Amount   |
 |-----------------------------|----------|
-| Google searches             | ~24.9    |
-| Seconds of video streaming  | ~498.0   |
-| Smartphone charges          | ~0.606   |
-| Minutes of a 10W LED bulb   | ~74.7    |
-| km driven (EU avg car)      | ~0.04116 |
+| Google searches             | ~23.6    |
+| Seconds of video streaming  | ~472.3   |
+| Smartphone charges          | ~0.575   |
+| Minutes of a 10W LED bulb   | ~70.8    |
+| km driven (EU avg car)      | ~0.03904 |
 
-> **Tip:** Great efficiency! Small models and focused prompts pay off.
+> **Tip:** Not bad! Try batching questions to reduce message overhead.
 ```
+
+This example mixes a medium model (`claude-sonnet-4-5`) with a small one (`claude-haiku-4-5`) in the same session -- each model's tokens are billed at its own energy factor, and the per-model lines sum to the session total.
 
 ## Configuration
 
@@ -127,12 +136,26 @@ The plugin classifies each model into a size tier and applies an energy-per-toke
 | Medium     | 1.0 Wh / 1k tokens | Claude Sonnet, GPT-4o, Gemini Pro |
 | Large      | 3.0 Wh / 1k tokens | Claude Opus, o3 |
 
+Tokens are tracked **per model** (keyed by `modelID`), not just per session. A
+session that starts on a large model and switches to a small one bills each
+model's tokens at that model's own rate, then sums the results -- instead of
+billing every token in the session at a single "dominant" model's rate.
+Input, output, reasoning, and cache read/write tokens are all counted toward
+each model's billable total (cache tokens are billed at the same rate as a
+simplification -- in reality cache reads are cheaper since they skip the
+full forward pass, but there's no published per-token rate for them).
+
 ### CO2 calculation
 
 ```
-energy (kWh) = total_tokens * energy_per_token
-CO2 (grams)  = energy (kWh) * grid_intensity (gCO2/kWh)
+per_model_energy (kWh) = model_tokens * energy_per_token * PUE
+energy (kWh)            = sum(per_model_energy for each model used)
+CO2 (grams)              = energy (kWh) * grid_intensity (gCO2/kWh)
 ```
+
+`PUE` (Power Usage Effectiveness, ~1.1 for hyperscale data centers) scales
+the raw compute energy up to account for cooling, power distribution, and
+other data center overhead.
 
 ### Eco grade
 
@@ -159,10 +182,15 @@ The session grade is based on grams of CO2 per message:
 ```
 .opencode/
   plugins/
-    co2-tracker.ts    # Core plugin: tracking, computation, and report formatting
+    co2-tracker.ts      # Core plugin: tracking, computation, and report formatting
   commands/
-    co2.md            # Slash command definition for /co2
-  package.json        # Plugin SDK dependency
+    co2.md              # Slash command definition for /co2
+  co2-tracker.test.ts    # Unit tests (node --test)
+  package.json           # Plugin SDK dependency + typecheck/test scripts
+  tsconfig.json          # Typecheck config
+.github/
+  workflows/
+    ci.yml               # Typecheck + tests on Node 24
 ```
 
 ## License

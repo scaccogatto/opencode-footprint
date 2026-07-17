@@ -12,7 +12,17 @@ import { tool } from "@opencode-ai/plugin"
 // These are rough estimates. Real values depend on hardware, data center
 // location, cooling, and model architecture. Users can override the grid
 // carbon intensity via the OPENCODE_CO2_GRID_INTENSITY env var.
+//
+// Tokens are tracked per model (see ModelTokens/SessionStats below) so a
+// session that mixes small and large models bills each model's tokens at
+// that model's own energy factor, then sums across models -- rather than
+// billing every token in the session at one "dominant" model's rate.
 // ---------------------------------------------------------------------------
+
+// Power Usage Effectiveness for hyperscale data centers: total facility
+// energy / IT equipment energy. Applied on top of the raw per-token energy
+// estimate to account for cooling, power distribution, etc.
+const PUE = 1.1
 
 const MODEL_SIZE: Record<string, "small" | "medium" | "large"> = {
   // Anthropic
@@ -56,7 +66,7 @@ function getGridIntensity(): number {
   return DEFAULT_GRID_INTENSITY
 }
 
-function classifyModel(modelID: string): "small" | "medium" | "large" {
+export function classifyModel(modelID: string): "small" | "medium" | "large" {
   // Try exact match first
   if (MODEL_SIZE[modelID]) return MODEL_SIZE[modelID]
   // Fuzzy match on substrings
@@ -146,7 +156,7 @@ const ECO_THRESHOLDS: { maxPerMsg: number; grade: EcoGrade }[] = [
   },
 ]
 
-function getEcoGrade(co2Grams: number, messages: number): EcoGrade {
+export function getEcoGrade(co2Grams: number, messages: number): EcoGrade {
   const perMsg = messages > 0 ? co2Grams / messages : 0
   for (const t of ECO_THRESHOLDS) {
     if (perMsg <= t.maxPerMsg) return t.grade
@@ -165,32 +175,75 @@ function impactBar(level: number): string {
 // Per-session accumulator
 // ---------------------------------------------------------------------------
 
+export interface ModelTokens {
+  input: number
+  output: number
+  reasoning: number
+  cacheRead: number
+  cacheWrite: number
+}
+
+function newModelTokens(): ModelTokens {
+  return { input: 0, output: 0, reasoning: 0, cacheRead: 0, cacheWrite: 0 }
+}
+
 interface SessionStats {
-  inputTokens: number
-  outputTokens: number
-  reasoningTokens: number
-  cacheReadTokens: number
-  cacheWriteTokens: number
+  tokensByModel: Map<string, ModelTokens>
   cost: number // USD from the provider
   messages: number
-  models: Set<string>
   providers: Set<string>
   firstSeen: number
 }
 
 function newSessionStats(): SessionStats {
   return {
-    inputTokens: 0,
-    outputTokens: 0,
-    reasoningTokens: 0,
-    cacheReadTokens: 0,
-    cacheWriteTokens: 0,
+    tokensByModel: new Map(),
     cost: 0,
     messages: 0,
-    models: new Set(),
     providers: new Set(),
     firstSeen: Date.now(),
   }
+}
+
+// ---------------------------------------------------------------------------
+// Energy / CO2 computation -- pure functions, exported for testing
+// ---------------------------------------------------------------------------
+
+export interface ModelEnergyBreakdown {
+  modelID: string
+  tokens: number
+  energyKwh: number
+}
+
+// Total billable tokens for one model: input + output + reasoning + cache.
+// ponytail: cache read/write tokens are billed at the same per-token factor
+// as regular tokens -- a simplification. In reality cache reads are much
+// cheaper (no full forward pass), but no published per-token rate exists
+// for cache tokens specifically, so we fold them into the same estimate.
+function billableTokens(tokens: ModelTokens): number {
+  return (
+    tokens.input +
+    tokens.output +
+    tokens.reasoning +
+    tokens.cacheRead +
+    tokens.cacheWrite
+  )
+}
+
+// Per-model energy breakdown, with PUE already applied to each line so the
+// lines sum exactly to the session total.
+export function computeModelEnergyBreakdown(
+  tokensByModel: Map<string, ModelTokens>,
+): ModelEnergyBreakdown[] {
+  return [...tokensByModel.entries()].map(([modelID, tokens]) => {
+    const total = billableTokens(tokens)
+    const energyPerToken = ENERGY_PER_TOKEN_KWH[classifyModel(modelID)]
+    return { modelID, tokens: total, energyKwh: total * energyPerToken * PUE }
+  })
+}
+
+export function sumEnergyKwh(breakdown: ModelEnergyBreakdown[]): number {
+  return breakdown.reduce((sum, b) => sum + b.energyKwh, 0)
 }
 
 // ---------------------------------------------------------------------------
@@ -227,33 +280,19 @@ export const CO2TrackerPlugin: Plugin = async ({ client }) => {
     totalTokens: number
     energyKwh: number
     co2Grams: number
+    breakdown: ModelEnergyBreakdown[]
   } {
     const gridIntensity = getGridIntensity()
-    const totalTokens =
-      stats.inputTokens + stats.outputTokens + stats.reasoningTokens
-
-    // Weighted energy estimate across all models used.
-    // Since we don't track tokens per model, we use the dominant model class.
-    // For simplicity, pick the largest model class seen.
-    let dominantClass: "small" | "medium" | "large" = "small"
-    for (const modelID of stats.models) {
-      const cls = classifyModel(modelID)
-      if (cls === "large") {
-        dominantClass = "large"
-        break
-      }
-      if (cls === "medium") dominantClass = "medium"
-    }
-
-    const energyPerToken = ENERGY_PER_TOKEN_KWH[dominantClass]
-    const energyKwh = totalTokens * energyPerToken
+    const breakdown = computeModelEnergyBreakdown(stats.tokensByModel)
+    const totalTokens = breakdown.reduce((sum, b) => sum + b.tokens, 0)
+    const energyKwh = sumEnergyKwh(breakdown)
     const co2Grams = energyKwh * gridIntensity
 
-    return { totalTokens, energyKwh, co2Grams }
+    return { totalTokens, energyKwh, co2Grams, breakdown }
   }
 
   function formatReport(stats: SessionStats): string {
-    const { totalTokens, energyKwh, co2Grams } = computeCO2(stats)
+    const { totalTokens, energyKwh, co2Grams, breakdown } = computeCO2(stats)
     const durationMin = (Date.now() - stats.firstSeen) / 60_000
     const grade = getEcoGrade(co2Grams, stats.messages)
     const co2PerMessage =
@@ -266,10 +305,27 @@ export const CO2TrackerPlugin: Plugin = async ({ client }) => {
     const ledBulbMin = co2Grams / 0.0667 // 10W LED at 400 gCO2/kWh
     const kmDriven = co2Grams / 121 // EU avg car ~121 gCO2/km
 
-    const modelLines =
-      [...stats.models].length > 0
-        ? [...stats.models].map((m) => `- **${m}**`).join("\n")
-        : "- None recorded"
+    // Aggregate per-model token counts for the Token Breakdown table.
+    const aggregated = [...stats.tokensByModel.values()].reduce(
+      (sum, t) => ({
+        input: sum.input + t.input,
+        output: sum.output + t.output,
+        reasoning: sum.reasoning + t.reasoning,
+        cacheRead: sum.cacheRead + t.cacheRead,
+        cacheWrite: sum.cacheWrite + t.cacheWrite,
+      }),
+      newModelTokens(),
+    )
+
+    const breakdownLines =
+      breakdown.length > 0
+        ? breakdown
+            .map(
+              (b) =>
+                `| ${b.modelID} | ${b.tokens.toLocaleString()} | ${(b.energyKwh * 1000).toFixed(4)} Wh |`,
+            )
+            .join("\n")
+        : "| None recorded | 0 | 0.0000 Wh |"
     const providerLines =
       [...stats.providers].length > 0
         ? [...stats.providers].map((p) => `- ${p}`).join("\n")
@@ -291,6 +347,12 @@ export const CO2TrackerPlugin: Plugin = async ({ client }) => {
       `| Messages | ${stats.messages} |`,
       `| Total tokens | ${totalTokens.toLocaleString()} |`,
       `| API cost | $${stats.cost.toFixed(6)} |`,
+      ``,
+      `### Per-Model Breakdown`,
+      ``,
+      `| Model | Tokens | Energy |`,
+      `|---|---|---|`,
+      breakdownLines,
       ``,
       `### Carbon Footprint`,
       ``,
@@ -317,15 +379,11 @@ export const CO2TrackerPlugin: Plugin = async ({ client }) => {
       ``,
       `| Type | Count |`,
       `|---|---|`,
-      `| Input | ${stats.inputTokens.toLocaleString()} |`,
-      `| Output | ${stats.outputTokens.toLocaleString()} |`,
-      `| Reasoning | ${stats.reasoningTokens.toLocaleString()} |`,
-      `| Cache read | ${stats.cacheReadTokens.toLocaleString()} |`,
-      `| Cache write | ${stats.cacheWriteTokens.toLocaleString()} |`,
-      ``,
-      `### Models Used`,
-      ``,
-      modelLines,
+      `| Input | ${aggregated.input.toLocaleString()} |`,
+      `| Output | ${aggregated.output.toLocaleString()} |`,
+      `| Reasoning | ${aggregated.reasoning.toLocaleString()} |`,
+      `| Cache read | ${aggregated.cacheRead.toLocaleString()} |`,
+      `| Cache write | ${aggregated.cacheWrite.toLocaleString()} |`,
       ``,
       `### Providers`,
       ``,
@@ -368,24 +426,37 @@ export const CO2TrackerPlugin: Plugin = async ({ client }) => {
         }
         const isNew = !messageSnapshots.has(key)
 
-        stats.inputTokens += msg.tokens.input - prev.input
-        stats.outputTokens += msg.tokens.output - prev.output
-        stats.reasoningTokens += msg.tokens.reasoning - prev.reasoning
-        stats.cacheReadTokens += msg.tokens.cache.read - prev.cacheRead
-        stats.cacheWriteTokens += msg.tokens.cache.write - prev.cacheWrite
-        stats.cost += msg.cost - prev.cost
+        // Guard every field: an undefined token count must not poison totals.
+        const input = msg.tokens?.input ?? 0
+        const output = msg.tokens?.output ?? 0
+        const reasoning = msg.tokens?.reasoning ?? 0
+        const cacheRead = msg.tokens?.cache?.read ?? 0
+        const cacheWrite = msg.tokens?.cache?.write ?? 0
+        const cost = msg.cost ?? 0
+
+        let modelTokens = stats.tokensByModel.get(msg.modelID)
+        if (!modelTokens) {
+          modelTokens = newModelTokens()
+          stats.tokensByModel.set(msg.modelID, modelTokens)
+        }
+        modelTokens.input += input - prev.input
+        modelTokens.output += output - prev.output
+        modelTokens.reasoning += reasoning - prev.reasoning
+        modelTokens.cacheRead += cacheRead - prev.cacheRead
+        modelTokens.cacheWrite += cacheWrite - prev.cacheWrite
+
+        stats.cost += cost - prev.cost
         if (isNew) stats.messages += 1
-        stats.models.add(msg.modelID)
         stats.providers.add(msg.providerID)
 
         // Save the current snapshot for future delta calculations
         messageSnapshots.set(key, {
-          input: msg.tokens.input,
-          output: msg.tokens.output,
-          reasoning: msg.tokens.reasoning,
-          cacheRead: msg.tokens.cache.read,
-          cacheWrite: msg.tokens.cache.write,
-          cost: msg.cost,
+          input,
+          output,
+          reasoning,
+          cacheRead,
+          cacheWrite,
+          cost,
         })
       }
     },
