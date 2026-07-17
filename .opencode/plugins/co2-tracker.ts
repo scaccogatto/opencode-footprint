@@ -1,5 +1,7 @@
 import type { Plugin } from "@opencode-ai/plugin"
 import { tool } from "@opencode-ai/plugin"
+import { writeFile } from "node:fs/promises"
+import path from "node:path"
 
 // ---------------------------------------------------------------------------
 // CO2 emission model
@@ -57,7 +59,7 @@ const ENERGY_PER_TOKEN_KWH: Record<string, number> = {
 // Global average ≈ 400. Override with OPENCODE_CO2_GRID_INTENSITY.
 const DEFAULT_GRID_INTENSITY = 400
 
-function getGridIntensity(): number {
+export function getGridIntensity(): number {
   const env = process.env.OPENCODE_CO2_GRID_INTENSITY
   if (env) {
     const parsed = parseFloat(env)
@@ -247,6 +249,47 @@ export function sumEnergyKwh(breakdown: ModelEnergyBreakdown[]): number {
 }
 
 // ---------------------------------------------------------------------------
+// Cross-session (lifetime) totals -- pure reducer over a persisted
+// per-session map. TUI-side callers (e.g. the sidebar) persist this shape
+// via api.kv; this file only owns the math so it stays testable.
+// ---------------------------------------------------------------------------
+
+export interface LifetimeSessionTotal {
+  grams: number
+  kwh: number
+}
+
+export type LifetimeSessions = Record<string, LifetimeSessionTotal>
+
+// Overwrites (not adds to) this session's entry with its current running
+// total. Idempotent by design: re-renders, TUI restarts, and replayed
+// message events all recompute the same session total from scratch, so
+// upserting instead of accumulating deltas means a session can never be
+// double-counted into the lifetime sum.
+export function upsertLifetimeSession(
+  sessions: LifetimeSessions,
+  sessionID: string,
+  total: LifetimeSessionTotal,
+): LifetimeSessions {
+  return { ...sessions, [sessionID]: total }
+}
+
+export interface LifetimeSummary {
+  grams: number
+  kwh: number
+  sessions: number
+}
+
+export function summarizeLifetime(sessions: LifetimeSessions): LifetimeSummary {
+  const totals = Object.values(sessions)
+  return {
+    grams: totals.reduce((sum, t) => sum + t.grams, 0),
+    kwh: totals.reduce((sum, t) => sum + t.kwh, 0),
+    sessions: totals.length,
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Plugin
 // ---------------------------------------------------------------------------
 
@@ -399,6 +442,39 @@ export const CO2TrackerPlugin: Plugin = async ({ client }) => {
     return lines.join("\n")
   }
 
+  // Raw-data counterpart to formatReport(), for the `export: "json"` tool
+  // arg. Numbers stay unformatted (no toFixed/locale strings) -- that's the
+  // JSON contract, callers format as they see fit.
+  function buildReportData(stats: SessionStats) {
+    const { totalTokens, energyKwh, co2Grams, breakdown } = computeCO2(stats)
+    const grade = getEcoGrade(co2Grams, stats.messages)
+    return {
+      grade: grade.grade,
+      label: grade.label,
+      tip: grade.tip,
+      durationMinutes: (Date.now() - stats.firstSeen) / 60_000,
+      messages: stats.messages,
+      totalTokens,
+      costUsd: stats.cost,
+      energyKwh,
+      co2Grams,
+      co2PerMessageGrams: stats.messages > 0 ? co2Grams / stats.messages : 0,
+      gridIntensityGco2PerKwh: getGridIntensity(),
+      breakdown,
+      tokensByType: [...stats.tokensByModel.values()].reduce(
+        (sum, t) => ({
+          input: sum.input + t.input,
+          output: sum.output + t.output,
+          reasoning: sum.reasoning + t.reasoning,
+          cacheRead: sum.cacheRead + t.cacheRead,
+          cacheWrite: sum.cacheWrite + t.cacheWrite,
+        }),
+        newModelTokens(),
+      ),
+      providers: [...stats.providers],
+    }
+  }
+
   return {
     // ----- Event listener: track token usage from assistant messages -----
     event: async ({ event }) => {
@@ -469,9 +545,16 @@ export const CO2TrackerPlugin: Plugin = async ({ client }) => {
           "Generates an eco report with session grade (A+ to F), carbon footprint breakdown, " +
           "real-world equivalents, token usage, and actionable tips to code greener. " +
           "Call this tool when the user asks about CO2, carbon footprint, " +
-          "environmental impact, or energy usage of their session.",
-        args: {},
-        async execute(_args, context) {
+          "environmental impact, or energy usage of their session. " +
+          "Pass `export: \"json\"` or `export: \"markdown\"` to also write the report " +
+          "to a co2-report file in the project directory.",
+        args: {
+          export: tool.schema
+            .enum(["json", "markdown"])
+            .optional()
+            .describe("Also write the report to co2-report.<ext> in the project directory."),
+        },
+        async execute(args, context) {
           const stats = sessions.get(context.sessionID)
           if (!stats || stats.messages === 0) {
             return (
@@ -479,7 +562,15 @@ export const CO2TrackerPlugin: Plugin = async ({ client }) => {
               "Start a conversation and check back -- your eco report will be waiting!"
             )
           }
-          return formatReport(stats)
+          const report = formatReport(stats)
+          if (!args.export) return report
+
+          const ext = args.export === "json" ? "json" : "md"
+          const content =
+            args.export === "json" ? JSON.stringify(buildReportData(stats), null, 2) : report
+          const filePath = path.join(context.directory, `co2-report.${ext}`)
+          await writeFile(filePath, content, "utf8")
+          return `${report}\n\n*Exported to \`${filePath}\`*`
         },
       }),
     },

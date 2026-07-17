@@ -8,7 +8,9 @@
     "allowImportingTsExtensions": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
+    "jsx": "preserve",
+    "jsxImportSource": "@opentui/solid",
     "types": ["node"]
   },
-  "include": ["plugins/**/*.ts", "*.ts"]
+  "include": ["plugins/**/*.ts", "plugins/**/*.tsx", "*.ts"]
 }
