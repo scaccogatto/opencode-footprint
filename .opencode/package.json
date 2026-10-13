@@ -13,6 +13,7 @@
   },
   "scripts": {
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "node --test co2-tracker.test.ts"
+    "test": "node --test co2-tracker.test.ts",
+    "test:bun": "bun test ./co2-tracker.test.ts"
   }
 }

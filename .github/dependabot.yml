@@ -1,6 +1,8 @@
 version: 2
 updates:
-  - package-ecosystem: npm
+  # bun (not npm): the npm updater does not regenerate .opencode/bun.lock,
+  # and CI installs with --frozen-lockfile.
+  - package-ecosystem: bun
     directory: /.opencode
     schedule:
       interval: weekly

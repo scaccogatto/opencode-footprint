@@ -1,26 +1,30 @@
 ---
 description: Install the opencode-footprint CO2 tracker plugin
 ---
-Install the opencode-footprint plugin into this project. Follow these steps exactly:
+Install the opencode-footprint plugin into this project from its latest tagged release. Never download files from the `main` branch. Follow these steps exactly, from the project root:
 
-1. Create the `.opencode/plugins/`, `.opencode/plugins/lib/`, and `.opencode/commands/` directories if they don't exist.
-2. Download the server plugin from `https://raw.githubusercontent.com/scaccogatto/opencode-footprint/main/.opencode/plugins/co2-tracker.ts` and save it to `.opencode/plugins/co2-tracker.ts`.
-3. Download the sidebar plugin from `https://raw.githubusercontent.com/scaccogatto/opencode-footprint/main/.opencode/plugins/co2-sidebar.tsx` and save it to `.opencode/plugins/co2-sidebar.tsx`.
-4. Download the sidebar logic module from `https://raw.githubusercontent.com/scaccogatto/opencode-footprint/main/.opencode/plugins/lib/co2-sidebar-logic.ts` and save it to `.opencode/plugins/lib/co2-sidebar-logic.ts`.
-5. Download the command file from `https://raw.githubusercontent.com/scaccogatto/opencode-footprint/main/.opencode/commands/co2.md` and save it to `.opencode/commands/co2.md`.
-6. Download `https://raw.githubusercontent.com/scaccogatto/opencode-footprint/main/.opencode/tui.json` and save it to `.opencode/tui.json`, merging with any existing `.opencode/tui.json` `plugin` array instead of overwriting it. This step registers the sidebar panel -- TUI plugins are not auto-discovered from `.opencode/plugins/`, unlike the server plugin.
-7. If `.opencode/package.json` already exists, make sure it lists these dependencies (add whichever are missing): `@opencode-ai/plugin` (`1.18.3` or later), `@opentui/core` (`0.4.5` or later), `@opentui/solid` (`0.4.5` or later), `solid-js` (`1.9.12`). If `.opencode/package.json` doesn't exist, create it with:
-   ```json
-   {
-     "dependencies": {
-       "@opencode-ai/plugin": "1.19.0",
-       "@opentui/core": "0.4.5",
-       "@opentui/solid": "0.4.5",
-       "solid-js": "1.9.12"
-     }
-   }
+1. Resolve the latest release tag and download that release's source archive into a temporary directory. The snippet only prints errors (it never exits the shell). If it prints a line starting with `ERROR`, stop and report that line to the user:
+   ```sh
+   TAG=$(curl -fsSL https://api.github.com/repos/scaccogatto/opencode-footprint/releases/latest | sed -n 's/^ *"tag_name": *"\([^"]*\)".*/\1/p')
+   SRC=""
+   case "$TAG" in
+     v[0-9]*)
+       SRC=$(mktemp -d) &&
+       curl -fsSL "https://github.com/scaccogatto/opencode-footprint/archive/refs/tags/$TAG.tar.gz" | tar -xz -C "$SRC" --strip-components=1 &&
+       test -f "$SRC/.opencode/plugins/co2-tracker.ts" &&
+       echo "Installing opencode-footprint $TAG from $SRC" ||
+       echo "ERROR: could not download or unpack release $TAG" >&2
+       ;;
+     *) echo "ERROR: could not resolve the latest release tag" >&2 ;;
+   esac
    ```
-8. Run `bun install` inside `.opencode/` to install dependencies.
-9. Confirm the installation was successful by listing the installed files.
-
-Use `curl` for downloads. Do not clone the entire repository.
+2. Copy the plugin files from the release into this project, overwriting older copies of the same files:
+   ```sh
+   mkdir -p .opencode/plugins .opencode/commands
+   cp -R "$SRC/.opencode/plugins/." .opencode/plugins/
+   cp "$SRC/.opencode/commands/co2.md" .opencode/commands/co2.md
+   ```
+3. Register the sidebar panel: if `.opencode/tui.json` does not exist, copy `$SRC/.opencode/tui.json` to it. If it exists, add `"./plugins/co2-sidebar.tsx"` to its `plugin` array (keep every existing entry). TUI plugins are not auto-discovered from `.opencode/plugins/`, unlike the server plugin.
+4. Merge the `dependencies` object of `$SRC/.opencode/package.json` into `.opencode/package.json` (create the file with just that `dependencies` object if it doesn't exist). Use the release's exact versions for those packages. Do not copy its `devDependencies` or `scripts`.
+5. Run `bun install` inside `.opencode/`.
+6. Delete the temporary directory (`rm -rf "$SRC"`), then confirm the installation by listing the installed files and reporting the installed release tag. Remind the user that the plugin needs OpenCode 1.18.0 or later.
