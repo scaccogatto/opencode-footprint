@@ -13,13 +13,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Report duration now spans the session's first message to its last activity (it used to start at the first event the running process saw).
 - `co2-tracker.ts` now uses OpenCode's V1 plugin module shape (`export default { id, server }`) and exports nothing else. The pure logic moved to `plugins/lib/co2-core.ts` and `plugins/lib/co2-report.ts`.
 - Token counts in the report are always formatted with `en-US` digit grouping, independent of the host locale.
-- Install flow: `INSTALL.md` now installs the latest tagged release (source archive of the tag) instead of downloading files from `main`, and takes dependency versions from that release's `.opencode/package.json`.
+- Install flow: `INSTALL.md` now installs the latest tagged release (source archive of the tag) instead of downloading files from `main`, and takes dependency versions from that release's `.opencode/package.json`. Its shell snippet reports errors without exiting the agent's shell.
 - Documented a single minimum host version: OpenCode 1.18.0.
 
 ### Fixed
 
 - The server plugin no longer logs "failed to load plugin" at startup: OpenCode's legacy loader called every exported helper (`classifyModel` and others) as a plugin.
 - Model classification matches whole id segments: the `mini` inside `gemini` no longer classifies Gemini Pro models as small, and provider-prefixed ids (`openai/o3-mini`, `anthropic/claude-opus-4-5`) are classified like bare ids.
+- Dated and suffixed OpenAI reasoning minis (`o3-mini-2025-01-31`, `o4-mini-high`) are classified medium like `o3-mini` and `o4-mini`, instead of small.
 - The "Minutes of a 10W LED bulb" equivalent is computed from energy, so it is now correct when `OPENCODE_CO2_GRID_INTENSITY` is set (it assumed 400 gCO2/kWh).
 - A failed session history request is reported as an error instead of an empty report.
 - The README example output now matches what the report actually prints.

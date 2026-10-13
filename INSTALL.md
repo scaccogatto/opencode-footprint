@@ -3,14 +3,20 @@ description: Install the opencode-footprint CO2 tracker plugin
 ---
 Install the opencode-footprint plugin into this project from its latest tagged release. Never download files from the `main` branch. Follow these steps exactly, from the project root:
 
-1. Resolve the latest release tag and download that release's source archive into a temporary directory:
+1. Resolve the latest release tag and download that release's source archive into a temporary directory. The snippet only prints errors (it never exits the shell). If it prints a line starting with `ERROR`, stop and report that line to the user:
    ```sh
-   set -eu
    TAG=$(curl -fsSL https://api.github.com/repos/scaccogatto/opencode-footprint/releases/latest | sed -n 's/^ *"tag_name": *"\([^"]*\)".*/\1/p')
-   case "$TAG" in v[0-9]*) ;; *) echo "could not resolve the latest release tag" >&2; exit 1 ;; esac
-   SRC=$(mktemp -d)
-   curl -fsSL "https://github.com/scaccogatto/opencode-footprint/archive/refs/tags/$TAG.tar.gz" | tar -xz -C "$SRC" --strip-components=1
-   echo "Installing opencode-footprint $TAG from $SRC"
+   SRC=""
+   case "$TAG" in
+     v[0-9]*)
+       SRC=$(mktemp -d) &&
+       curl -fsSL "https://github.com/scaccogatto/opencode-footprint/archive/refs/tags/$TAG.tar.gz" | tar -xz -C "$SRC" --strip-components=1 &&
+       test -f "$SRC/.opencode/plugins/co2-tracker.ts" &&
+       echo "Installing opencode-footprint $TAG from $SRC" ||
+       echo "ERROR: could not download or unpack release $TAG" >&2
+       ;;
+     *) echo "ERROR: could not resolve the latest release tag" >&2 ;;
+   esac
    ```
 2. Copy the plugin files from the release into this project, overwriting older copies of the same files:
    ```sh
