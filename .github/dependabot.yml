@@ -5,9 +5,10 @@ updates:
     schedule:
       interval: weekly
     ignore:
-      # Kept in lockstep with the @opentui/* and solid-js versions bundled by the
-      # OpenCode host release this plugin targets (the host redirects these
-      # imports to its own copies at runtime). Bump them manually with OpenCode.
+      # @opentui/* follows the version bundled by the OpenCode host release this
+      # plugin targets (the host redirects these imports to its own copies at
+      # runtime). solid-js follows the exact peer that @opentui/solid and
+      # @opentui/keymap require. Bump them manually together with OpenCode.
       - dependency-name: "@opentui/*"
       - dependency-name: solid-js
     groups:
