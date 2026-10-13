@@ -4,14 +4,18 @@ An [OpenCode](https://opencode.ai) plugin that tracks the CO2 carbon footprint o
 
 ## Features
 
-- **Live tracking** -- automatically accumulates token usage across all messages in a session
+- **Full-session tracking** -- the report is computed from the session's whole message history, so resumed sessions and OpenCode restarts are covered
 - **Eco scoring** -- assigns a letter grade (A+ to F) based on CO2 efficiency per message
 - **Real-world equivalents** -- translates grams of CO2 into Google searches, seconds of video streaming, smartphone charges, and more
 - **Multi-model aware** -- tracks tokens per model and bills each model's tokens at its own size-based energy estimate, then sums across models used in the session
 - **Configurable grid intensity** -- override the default 400 gCO2/kWh with your region's carbon intensity
-- **Sidebar panel** -- session grade/CO2/kWh and an all-time total, always visible in the OpenCode TUI (requires plugin API >=1.18, see [Sidebar](#sidebar))
+- **Sidebar panel** -- session grade/CO2/kWh and an all-time total, always visible in the OpenCode TUI (see [Sidebar](#sidebar))
 - **Report export** -- write the eco report to `co2-report.json` or `co2-report.md` in the project directory
 - **Zero config** -- drop the files into your project and it works
+
+## Requirements
+
+OpenCode **1.18.0 or later** (needed for TUI slot plugins and V1 plugin modules). The plugin SDK and `@opentui/*` versions to install are the ones pinned in [`.opencode/package.json`](.opencode/package.json) of the release you install.
 
 ## Install
 
@@ -21,15 +25,15 @@ The quickest way to install is to let OpenCode do it for you. Humans can fail, s
 https://raw.githubusercontent.com/scaccogatto/opencode-footprint/main/INSTALL.md
 ```
 
-The agent will download the plugin files, set up dependencies, and verify the installation automatically.
+The agent resolves the latest [release](https://github.com/scaccogatto/opencode-footprint/releases), downloads that tagged version (never unreleased code from `main`), sets up dependencies, and verifies the installation.
 
 ### Manual install
 
 If you prefer to do it yourself:
 
 ```sh
-# Clone the repo
-git clone https://github.com/scaccogatto/opencode-footprint.git
+# Clone the latest release (replace vX.Y.Z with the tag from the releases page)
+git clone --depth 1 --branch vX.Y.Z https://github.com/scaccogatto/opencode-footprint.git
 
 # Copy into your project
 cp -r opencode-footprint/.opencode/plugins/ your-project/.opencode/plugins/
@@ -39,18 +43,7 @@ cp opencode-footprint/.opencode/tui.json your-project/.opencode/tui.json
 
 The `tui.json` entry is what makes the [sidebar panel](#sidebar) load -- OpenCode does not auto-discover TUI plugins from `.opencode/plugins/`, unlike the server-side `co2_report` tool.
 
-Then make sure the plugin SDK is installed. If your project doesn't already have a `.opencode/package.json`, create one:
-
-```json
-{
-  "dependencies": {
-    "@opencode-ai/plugin": "1.19.0",
-    "@opentui/core": "0.4.5",
-    "@opentui/solid": "0.4.5",
-    "solid-js": "1.9.12"
-  }
-}
-```
+Then make sure the plugin SDK is installed: merge the `dependencies` block of the release's `.opencode/package.json` into your project's `.opencode/package.json` (create it if missing). Only `dependencies` are needed, not the dev dependencies or scripts.
 
 OpenCode runs `bun install` automatically at startup, so dependencies will be resolved on the next launch. The `@opentui/*` and `solid-js` dependencies are only needed for the [sidebar panel](#sidebar); the `/co2` report tool works with just `@opencode-ai/plugin`.
 
@@ -87,40 +80,60 @@ The tool's text output always includes the eco report, plus the exported file's 
 
 ### Session Overview
 
-| Metric     | Value   |
-|------------|---------|
-| Duration   | 8.3 min |
-| Messages   | 4       |
+| Metric | Value |
+|---|---|
+| Duration | 8.3 min |
+| Messages | 4 |
 | Total tokens | 12,450 |
-| API cost   | $0.034  |
+| API cost | $0.034000 |
 
 ### Per-Model Breakdown
 
 | Model | Tokens | Energy |
-|-------|--------|--------|
+|---|---|---|
 | claude-sonnet-4-5 | 10,000 | 11.0000 Wh |
-| claude-haiku-4-5  | 2,450  | 0.8085 Wh  |
+| claude-haiku-4-5 | 2,450 | 0.8085 Wh |
 
 ### Carbon Footprint
 
-| Metric          | Value       |
-|-----------------|-------------|
+| Metric | Value |
+|---|---|
 | Energy consumed | 11.8085 Wh |
 | **CO2 emitted** | **4.7234 g** |
-| CO2 per message | 1.1809 g   |
-| Grid intensity  | 400 gCO2/kWh |
+| CO2 per message | 1.1809 g |
+| Grid intensity | 400 gCO2/kWh |
 
 ### Real-World Equivalents
 
-| Equivalent                  | Amount   |
-|-----------------------------|----------|
-| Google searches             | ~23.6    |
-| Seconds of video streaming  | ~472.3   |
-| Smartphone charges          | ~0.575   |
-| Minutes of a 10W LED bulb   | ~70.8    |
-| km driven (EU avg car)      | ~0.03904 |
+Your session's footprint is roughly equal to:
+
+| Equivalent | Amount |
+|---|---|
+| Google searches | ~23.6 |
+| Seconds of video streaming | ~472.3 |
+| Smartphone charges | ~0.575 |
+| Minutes of a 10W LED bulb | ~70.9 |
+| km driven (EU avg car) | ~0.03904 |
+
+### Token Breakdown
+
+| Type | Count |
+|---|---|
+| Input | 6,100 |
+| Output | 2,350 |
+| Reasoning | 0 |
+| Cache read | 3,000 |
+| Cache write | 1,000 |
+
+### Providers
+
+- anthropic
+
+---
 
 > **Tip:** Not bad! Try batching questions to reduce message overhead.
+
+*Estimates based on Luccioni et al. (2023). Actual values vary by hardware, data center, and region. Configure grid intensity with `OPENCODE_CO2_GRID_INTENSITY` env var.*
 ```
 
 This example mixes a medium model (`claude-sonnet-4-5`) with a small one (`claude-haiku-4-5`) in the same session -- each model's tokens are billed at its own energy factor, and the per-model lines sum to the session total.
@@ -203,10 +216,10 @@ B  1.18g CO2  0.0118 kWh
 lifetime: 47.6 g
 ```
 
-- Line 1: session eco grade, CO2 grams, and energy (kWh) for the open session -- recomputed reactively as messages stream in, using the same `classifyModel` / `computeModelEnergyBreakdown` / `getEcoGrade` math as the `/co2` report.
-- Line 2: `lifetime: X g` -- an all-time CO2 total accumulated across every session, persisted via OpenCode's TUI key-value store (`api.kv`) so it survives restarts. The server-side plugin remains the source of truth for the full `/co2` report; the sidebar only reads `api.kv` for this cross-session number.
+- Line 1: session eco grade, CO2 grams, and energy (kWh) for the open session -- recomputed reactively as messages stream in, from the same message history and the same `lib/co2-core.ts` math as the `/co2` report, so both always agree.
+- Line 2: `lifetime: X g` -- an all-time CO2 total accumulated across every session, persisted via OpenCode's TUI key-value store (`api.kv`) so it survives restarts.
 
-**Requires OpenCode with TUI plugin/slot support (`@opencode-ai/plugin` >=1.18)** and the `tui.json` entry from the install step above -- OpenCode does not auto-discover TUI plugins from a directory, they must be listed explicitly.
+The sidebar needs the `tui.json` entry from the install step above -- OpenCode does not auto-discover TUI plugins from a directory, they must be listed explicitly.
 
 **Note:** OpenCode's `sidebar_footer` slot is "single winner" -- only one registered plugin's content renders there, and this plugin always wins it (it's registered at a lower `order` than the built-in). That means the built-in footer (the getting-started hint / current path / OpenCode version) never shows once this plugin is installed, and the panel itself is blank until the session's first assistant reply -- there's no in-between state.
 
@@ -215,30 +228,29 @@ lifetime: 47.6 g
 ```
 .opencode/
   plugins/
-    co2-tracker.ts       # Server plugin: tracking, computation, report formatting + export
+    co2-tracker.ts       # Server plugin: co2_report tool (default export only)
     co2-sidebar.tsx      # TUI plugin: sidebar_footer panel (default export, listed in tui.json)
     lib/
-      co2-sidebar-logic.ts # Pure sidebar logic (token aggregation, formatting) -- unit tested
+      co2-core.ts          # Pure CO2 model: classification, energy, grade, equivalents, lifetime totals
+      co2-report.ts        # Pure report builder (markdown + JSON) over a session's message history
+      co2-sidebar-logic.ts # Pure sidebar logic (session summary, formatting)
   commands/
     co2.md               # Slash command definition for /co2
   tui.json                # Registers co2-sidebar.tsx (TUI plugins are not auto-discovered)
-  co2-tracker.test.ts     # Unit tests (node --test)
+  co2-tracker.test.ts     # Unit tests (node --test and bun test)
+  bun.lock                # Dev lockfile (CI installs with --frozen-lockfile)
   package.json            # Plugin SDK + @opentui/solid-js dependencies, typecheck/test scripts
   tsconfig.json           # Typecheck config (incl. Solid JSX for the sidebar)
 .github/
   workflows/
-    ci.yml                # Typecheck + tests on Node 24
+    ci.yml                # Typecheck + tests on Node 24 and Bun
 ```
 
-`co2-sidebar-logic.ts` deliberately lives under `plugins/lib/`, not directly in `plugins/`: OpenCode's server plugin loader auto-globs every top-level `.opencode/plugins/*.{ts,js}` file and calls each function it exports as if it were a server plugin. A plain pure-logic file with several exported functions sitting at that top level would get misloaded and crash on startup; nesting it one directory deeper keeps it out of that glob while still being an ordinary, unit-tested TypeScript module.
+The pure modules deliberately live under `plugins/lib/`, not directly in `plugins/`: OpenCode's server plugin loader auto-globs every top-level `.opencode/plugins/*.{ts,js}` file, and for a module without a V1 default export (`export default { id, server }`) it calls every export as if it were a server plugin. `co2-tracker.ts` therefore exports only its V1 default, and a unit test enforces that for every top-level plugin file.
 
 ## Changelog
 
-### Unreleased
-
-- Added: TUI sidebar panel (`co2-sidebar.tsx`) showing session eco grade/CO2/kWh and an all-time lifetime total, persisted via `api.kv`.
-- Added: `export` arg on the `co2_report` tool -- writes `co2-report.json` or `co2-report.md` to the project directory.
-- Added: `.opencode/tui.json` to register the sidebar plugin (required -- TUI plugins are not auto-discovered).
+See [CHANGELOG.md](CHANGELOG.md).
 
 ## License
 
