@@ -1,12 +1,12 @@
 /** @jsxImportSource @opentui/solid */
 // TUI sidebar panel: session eco grade + CO2/kWh on one line, all-time
 // (cross-session) totals on a second line. All the math lives in
-// co2-tracker.ts / co2-sidebar-logic.ts (plain, unit-tested .ts modules);
-// this file only wires reactive reads to those pure functions and renders
-// the resulting strings -- no logic of its own.
+// lib/co2-core.ts and lib/co2-sidebar-logic.ts (plain, unit-tested .ts
+// modules). This file only wires reactive reads to those pure functions and
+// renders the resulting strings, with no logic of its own.
 import { createEffect, createMemo, Show, untrack } from "solid-js"
 import type { TuiPlugin, TuiPluginApi, TuiPluginModule } from "@opencode-ai/plugin/tui"
-import { getGridIntensity, summarizeLifetime, upsertLifetimeSession, type LifetimeSessions } from "./co2-tracker.ts"
+import { getGridIntensity, summarizeLifetime, upsertLifetimeSession, type LifetimeSessions } from "./lib/co2-core.ts"
 import { computeSessionCo2, formatLifetimeLine, formatSessionLine } from "./lib/co2-sidebar-logic.ts"
 
 const KV_KEY = "co2.lifetime.sessions"
@@ -14,7 +14,7 @@ const KV_KEY = "co2.lifetime.sessions"
 function Footer(props: { api: TuiPluginApi; sessionID: string }) {
   const theme = () => props.api.theme.current
 
-  const messages = createMemo(() => props.api.state.session.messages(props.sessionID) as any[])
+  const messages = createMemo(() => props.api.state.session.messages(props.sessionID))
   const session = createMemo(() => computeSessionCo2(messages(), getGridIntensity()))
 
   // Persist this session's latest running total into kv as a side effect.
