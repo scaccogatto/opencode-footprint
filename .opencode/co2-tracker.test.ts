@@ -77,6 +77,12 @@ test("classifyModel: exact MODEL_SIZE entries win over fuzzy matching", () => {
   assert.equal(classifyModel("o3-mini"), "medium")
 })
 
+test("classifyModel: exception entries also match suffixed variants", () => {
+  assert.equal(classifyModel("o3-mini-2025-01-31"), "medium")
+  assert.equal(classifyModel("o4-mini-high"), "medium")
+  assert.equal(classifyModel("openai/o4-mini-2025-04-16"), "medium")
+})
+
 test("classifyModel: unknown model defaults to medium", () => {
   assert.equal(classifyModel("totally-unknown-model-xyz"), "medium")
 })

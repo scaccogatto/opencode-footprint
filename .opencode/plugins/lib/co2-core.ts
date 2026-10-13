@@ -32,8 +32,9 @@ export type ModelSize = "small" | "medium" | "large"
 // estimate to account for cooling, power distribution, etc.
 export const PUE = 1.1
 
-// Exact-match exceptions to the token rules in classifyModel(). Only models
-// whose family markers would classify them wrongly need an entry here.
+// Exceptions to the token rules in classifyModel(). Only models whose family
+// markers would classify them wrongly need an entry here. An entry matches the
+// bare name and its dash-suffixed variants ("o4-mini-high", "o3-mini-2025-01-31").
 const MODEL_SIZE: Readonly<Record<string, ModelSize>> = {
   // OpenAI reasoning minis are mid-sized despite the "mini" marker.
   "o3-mini": "medium",
@@ -68,12 +69,14 @@ export function getGridIntensity(env: NodeJS.ProcessEnv = process.env): number {
 // Model ids arrive in many shapes: bare ("claude-opus-4-5"), provider
 // prefixed ("openrouter/google/gemini-2.5-pro"), or vendor qualified
 // ("anthropic.claude-haiku-4-5-20251001-v1:0"). Keep the last path segment
-// for the exact table, and split everything on separators for markers.
+// for the exceptions table, and split everything on separators for markers.
 export function classifyModel(modelID: string): ModelSize {
   const id = modelID.toLowerCase()
   const name = id.slice(id.lastIndexOf("/") + 1)
-  const exact = MODEL_SIZE[name]
-  if (exact) return exact
+  const exception = Object.entries(MODEL_SIZE).find(
+    ([key]) => name === key || name.startsWith(`${key}-`),
+  )
+  if (exception) return exception[1]
   const segments = id.split(/[-/._:@\s]+/)
   if (segments.some((s) => SMALL_MARKERS.has(s))) return "small"
   if (segments.some((s) => LARGE_MARKERS.has(s))) return "large"
