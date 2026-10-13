@@ -1,0 +1,29 @@
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /.opencode
+    schedule:
+      interval: weekly
+    ignore:
+      # Kept in lockstep with the @opentui/* and solid-js versions bundled by the
+      # OpenCode host release this plugin targets (the host redirects these
+      # imports to its own copies at runtime). Bump them manually with OpenCode.
+      - dependency-name: "@opentui/*"
+      - dependency-name: solid-js
+    groups:
+      minor-and-patch:
+        update-types:
+          - minor
+          - patch
+    open-pull-requests-limit: 5
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      minor-and-patch:
+        update-types:
+          - minor
+          - patch
+    open-pull-requests-limit: 5
