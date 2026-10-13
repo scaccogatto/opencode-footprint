@@ -44,7 +44,7 @@ Then make sure the plugin SDK is installed. If your project doesn't already have
 ```json
 {
   "dependencies": {
-    "@opencode-ai/plugin": "1.18.3",
+    "@opencode-ai/plugin": "1.19.0",
     "@opentui/core": "0.4.5",
     "@opentui/solid": "0.4.5",
     "solid-js": "1.9.12"
