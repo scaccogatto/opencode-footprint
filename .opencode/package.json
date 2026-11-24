@@ -1,7 +1,7 @@
 {
   "type": "module",
   "dependencies": {
-    "@opencode-ai/plugin": "1.19.5",
+    "@opencode-ai/plugin": "1.19.6",
     "@opentui/core": "0.4.5",
     "@opentui/solid": "0.4.5",
     "solid-js": "1.9.12"
